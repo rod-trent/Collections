@@ -12,10 +12,12 @@ import {
   getSettings,
   cacheItemImage,
   applyLinkResults,
+  applyImageResults,
   STORAGE_KEY,
 } from './lib/store.js';
 import { srcToCover } from './lib/image.js';
 import { classifyStatus } from './lib/linkcheck.js';
+import { extractImageUrl } from './lib/pagemeta.js';
 import { matchRule } from './lib/rules.js';
 import { searchEntries } from './lib/omnibox.js';
 
@@ -340,6 +342,135 @@ async function checkLinks(collectionId) {
   return probeTargets(collectTargets(data, { collectionId }));
 }
 
+// ---- Image backfill (fetch missing preview images) -------------------------
+// Imported pages (e.g. from a CSV) have no thumbnail, and we can't scrape a
+// live tab for a URL that isn't open. Instead we fetch the page HTML directly
+// (host access covers this), pull an og:image/twitter:image URL out of it, then
+// downscale that image into a stored data URL — the same size/format the normal
+// save path produces. Pages with no such image are left untouched (they keep
+// their favicon fallback).
+
+const IMAGE_FETCH_TIMEOUT_MS = 10000;
+const IMAGE_FETCH_CONCURRENCY = 4;
+const MAX_HTML_BYTES = 1_500_000; // the <head> comes early; don't buffer more
+
+// Read a response body as text but stop early — once we've seen the whole
+// <head> (all our meta tags live there) or hit the byte cap. Keeps a multi-MB
+// page from being fully buffered just to read a few meta tags.
+async function readHtmlHead(res, maxBytes) {
+  const reader = res.body?.getReader?.();
+  if (!reader) return (await res.text()).slice(0, maxBytes);
+  const decoder = new TextDecoder();
+  let out = '';
+  let seen = 0;
+  try {
+    while (seen < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      seen += value.byteLength;
+      out += decoder.decode(value, { stream: true });
+      if (/<\/head>/i.test(out)) break;
+    }
+  } finally {
+    try {
+      await reader.cancel();
+    } catch {
+      /* stream already closed */
+    }
+  }
+  return out;
+}
+
+// Fetch a page's HTML (bounded) and return an absolute preview-image URL, or ''.
+async function fetchPageImageUrl(pageUrl) {
+  if (!/^https?:/i.test(pageUrl || '')) return '';
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), IMAGE_FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(pageUrl, {
+      redirect: 'follow',
+      signal: ctrl.signal,
+      cache: 'no-store',
+      credentials: 'omit',
+    });
+    if (!res.ok) return '';
+    const type = res.headers.get('content-type') || '';
+    if (type && !/text\/html|application\/xhtml\+xml/i.test(type)) return '';
+    const html = await readHtmlHead(res, MAX_HTML_BYTES);
+    return extractImageUrl(html, res.url || pageUrl);
+  } catch {
+    return '';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// One page: fetch its image URL, then downscale to a stored data URL. '' on miss.
+async function fetchPageThumbnail(pageUrl) {
+  const imgUrl = await fetchPageImageUrl(pageUrl);
+  if (!imgUrl) return '';
+  try {
+    return await srcToCover(imgUrl, 512);
+  } catch {
+    return ''; // image URL was found but couldn't be fetched/decoded
+  }
+}
+
+// Collect page items that need an image, optionally scoped to one collection or
+// a single item. `replace` includes items that already have a thumbnail.
+function collectImageTargets(data, { collectionId, itemId, replace } = {}) {
+  const cols = collectionId
+    ? data.collections.filter((c) => c.id === collectionId)
+    : data.collections;
+  const targets = [];
+  for (const c of cols) {
+    for (const it of c.items) {
+      if (itemId && it.id !== itemId) continue;
+      if (it.type !== 'page' || !/^https?:/i.test(it.url || '')) continue;
+      if (!replace && it.thumbnail) continue; // only fill blanks unless replacing
+      targets.push({ collectionId: c.id, itemId: it.id, url: it.url });
+    }
+  }
+  return targets;
+}
+
+// Fetch thumbnails for a list of targets with bounded concurrency; persist in a
+// single batch write. Returns how many targets were scanned and how many got an
+// image.
+async function fetchImageTargets(targets) {
+  const results = new Array(targets.length);
+  let idx = 0;
+  let found = 0;
+  const worker = async () => {
+    for (let i = idx++; i < targets.length; i = idx++) {
+      const thumbnail = await fetchPageThumbnail(targets[i].url);
+      if (thumbnail) {
+        found++;
+        results[i] = {
+          collectionId: targets[i].collectionId,
+          itemId: targets[i].itemId,
+          thumbnail,
+        };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(IMAGE_FETCH_CONCURRENCY, targets.length) }, worker)
+  );
+  await applyImageResults(results.filter(Boolean));
+  return { total: targets.length, found };
+}
+
+// On-demand from the panel: all collections, one collection, or a single item.
+// A single-item request is an explicit "refresh this one", so it always
+// replaces; bulk requests honour the replaceExistingImages setting.
+async function fetchImages({ collectionId, itemId } = {}) {
+  const replace = itemId ? true : (await getSettings()).replaceExistingImages;
+  const data = await getData();
+  const targets = collectImageTargets(data, { collectionId, itemId, replace });
+  return fetchImageTargets(targets);
+}
+
 // ---- Periodic auto-check (opt-in) ------------------------------------------
 
 const LINK_ALARM = 'linkcheck';
@@ -410,6 +541,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === 'checkLinks') {
     checkLinks(msg.collectionId).then(sendResponse).catch(() => sendResponse(null));
+    return true; // async response
+  }
+  if (msg?.type === 'fetchImages') {
+    fetchImages({ collectionId: msg.collectionId, itemId: msg.itemId })
+      .then(sendResponse)
+      .catch(() => sendResponse(null));
     return true; // async response
   }
   return false;

@@ -69,7 +69,11 @@ step. Your data stays in your browser.
   page (responsive cards with thumbnails, links, notes and tags) you can send to
   anyone or host anywhere — saved as one portable file, with a one-click preview.
 - **Import your Edge export** (`collections_export.csv`) so your existing
-  collections carry over on day one.
+  collections carry over on day one. A CSV has no pictures, so imported pages
+  come in blank — click **Fetch missing images** (in a collection's ⋯ menu, or
+  **Fetch all missing images** in settings) to pull each page's preview image in
+  bulk. Or hover a single page and click **🖼️** to fetch just that one. By
+  default it only fills in pages with no image yet.
 - **Import your browser bookmarks** (Chrome/Edge) — each bookmark folder becomes
   a collection.
 - **JSON backup** (high fidelity: keeps notes, images, fields) and a local

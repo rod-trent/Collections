@@ -245,6 +245,13 @@ function reportLinkCheck(r) {
   toast(r.dead ? `Checked ${links} — ${r.dead} dead` : `Checked ${links} — all OK`);
 }
 
+function reportImageFetch(r) {
+  if (!r) return toast('Image fetch failed');
+  if (!r.total) return toast('No pages need images');
+  if (!r.found) return toast(`No images found for ${r.total} page${r.total === 1 ? '' : 's'}`);
+  toast(`Fetched ${r.found} image${r.found === 1 ? '' : 's'} of ${r.total}`);
+}
+
 let snapshotCtx = null; // { collectionId, itemId } for the open snapshot reader
 
 /** Open the snapshot reader for an item. */
@@ -1253,6 +1260,16 @@ function renderItem(collectionId, item) {
         }">📄</button>`
       : '';
 
+  // Page items can (re)fetch a preview image from the page — the manual
+  // counterpart to the bulk "Fetch missing images" action, and the way to
+  // backfill an image for an imported page that never had one.
+  const fetchImgBtn =
+    item.type === 'page'
+      ? `<button class="item-fetch-img-btn" title="${
+          item.thumbnail ? 'Refresh image from the page' : 'Fetch an image from the page'
+        }">🖼️</button>`
+      : '';
+
   // Page/image items carry an editable display title (pages) or alt text
   // (images) that can be renamed to something friendlier than the auto-captured
   // tab title.
@@ -1273,6 +1290,7 @@ function renderItem(collectionId, item) {
       ${renameBtn}
       ${addFieldBtn}
       ${snapshotBtn}
+      ${fetchImgBtn}
       <button class="item-move-btn" title="Move or copy to another collection">⇄</button>
       <button class="item-del" title="Remove">✕</button>
     </div>
@@ -1323,6 +1341,27 @@ function renderItem(collectionId, item) {
     snapView.addEventListener('click', (e) => {
       e.stopPropagation();
       showSnapshot(collectionId, item.id);
+    });
+  }
+  const fetchImgBtnEl = row.querySelector('.item-fetch-img-btn');
+  if (fetchImgBtnEl) {
+    fetchImgBtnEl.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      fetchImgBtnEl.disabled = true;
+      toast('Fetching image…');
+      try {
+        const r = await chrome.runtime.sendMessage({
+          type: 'fetchImages',
+          collectionId,
+          itemId: item.id,
+        });
+        toast(r && r.found ? 'Image updated' : 'No image found for this page');
+      } catch {
+        toast('Image fetch failed');
+      }
+      // The row re-renders on the resulting storage change; guard in case it
+      // didn't (no image found → no write).
+      if (fetchImgBtnEl.isConnected) fetchImgBtnEl.disabled = false;
     });
   }
   const unreadDot = row.querySelector('.unread-dot');
@@ -2823,6 +2862,9 @@ async function updateSettingLabels() {
   const s = await getSettings();
   const cacheBtn = $('#toggle-cache-btn');
   if (cacheBtn) cacheBtn.textContent = `Cache images: ${s.cacheImages ? 'On' : 'Off'}`;
+  const replaceImgBtn = $('#toggle-replace-images-btn');
+  if (replaceImgBtn)
+    replaceImgBtn.textContent = `Fetch images: ${s.replaceExistingImages ? 'Replace all' : 'Missing only'}`;
   const autoCheckBtn = $('#toggle-autocheck-btn');
   if (autoCheckBtn) autoCheckBtn.textContent = `Auto-check links: ${s.autoCheckLinks ? 'On' : 'Off'}`;
   const closeAfterOpenBtn = $('#toggle-close-after-open-btn');
@@ -2917,6 +2959,15 @@ async function runMenuAction(action) {
   if (action === 'check-all-links') {
     toast('Checking all links…');
     reportLinkCheck(await chrome.runtime.sendMessage({ type: 'checkLinks' }));
+  }
+  if (action === 'fetch-all-images') {
+    toast('Fetching images…');
+    reportImageFetch(await chrome.runtime.sendMessage({ type: 'fetchImages' }));
+  }
+  if (action === 'toggle-replace-images') {
+    const s = await getSettings();
+    await setSettings({ replaceExistingImages: !s.replaceExistingImages });
+    toast(`Fetch images: ${!s.replaceExistingImages ? 'replace all' : 'missing only'}`);
   }
   if (action === 'toggle-autocheck') {
     const s = await getSettings();
@@ -3186,6 +3237,10 @@ $('#detail-overflow-menu').addEventListener('click', async (e) => {
   if (action === 'cover-remove') {
     await setCover(openId, null);
     toast('Cover removed');
+  }
+  if (action === 'fetch-images') {
+    toast('Fetching images…');
+    reportImageFetch(await chrome.runtime.sendMessage({ type: 'fetchImages', collectionId: openId }));
   }
   if (action === 'cache-now') {
     toast('Caching images…');

@@ -852,6 +852,7 @@ body {
 .item-rename-btn,
 .item-field-add,
 .item-snapshot-btn,
+.item-fetch-img-btn,
 .item-move-btn {
   background: none;
   border: none;
@@ -868,6 +869,7 @@ body {
 .item:hover .item-rename-btn,
 .item:hover .item-field-add,
 .item:hover .item-snapshot-btn,
+.item:hover .item-fetch-img-btn,
 .item:hover .item-move-btn {
   opacity: 1;
 }
@@ -876,9 +878,15 @@ body {
 .item-rename-btn:hover,
 .item-field-add:hover,
 .item-snapshot-btn:hover,
+.item-fetch-img-btn:hover,
 .item-move-btn:hover {
   background: var(--bg-elev-2);
   color: var(--accent);
+}
+
+.item-fetch-img-btn:disabled {
+  cursor: default;
+  opacity: 0.4;
 }
 
 /* A page item that has a stored snapshot keeps its 📄 button visible as an

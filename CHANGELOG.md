@@ -3,6 +3,22 @@
 Release notes for Collections Plus. The summaries here double as the
 "What's new" copy used in the Chrome Web Store listing.
 
+## 2.4.0
+
+**Fetch missing images for imported pages.** Importing a CSV (e.g. from Edge
+Collections) brings in your links and titles, but the file has no pictures — so
+those pages came in blank. Now you can pull images in bulk instead of re-saving
+everything by hand. Open a collection's ⋯ menu and click **Fetch missing
+images**, or use **Fetch all missing images** in settings to sweep every
+collection at once. The extension visits each saved page, reads its social
+preview image (`og:image`/`twitter:image`), and stores a downscaled copy — the
+same picture you'd get by saving the page normally. Pages with no such image are
+left alone (they keep their favicon). By default it only fills in pages that have
+no image yet; flip **Fetch images: Missing only → Replace all** in settings to
+refresh existing covers too. For one-offs, hover any page and click the new **🖼️**
+button to fetch (or refresh) just that item's image. Thanks to the user who
+requested this after a CSV import.
+
 ## 2.3.0
 
 Three requested improvements for organizing — and protecting — a large library:

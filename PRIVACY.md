@@ -75,6 +75,15 @@ These are **off by default** and only do anything if you turn them on:
   you save (from the page they came from) so they survive the source going
   offline, and stores a downscaled copy locally. These requests go directly from
   your browser to the image's origin server — not to the developer.
+- **Fetch missing images.** When you click "Fetch missing images" (on a
+  collection, on a single item, or "Fetch all missing images" in settings), the
+  extension fetches the saved page's HTML to read its preview image
+  (`og:image`/`twitter:image`), then downloads that image and stores a
+  downscaled copy locally. This is the way to add pictures to pages imported from
+  a CSV, which arrive without them. It only runs when you click, requests go
+  directly from your browser to the pages and image servers you saved (not to the
+  developer, and without sending your cookies), and by default it only fills in
+  pages that have no image yet.
 - **AI chat (bring your own provider).** If you open AI settings and enter an API
   key, the extension can chat with your collections. When you send a chat
   message, the extension sends your message **and the contents of the
@@ -94,8 +103,10 @@ These are **off by default** and only do anything if you turn them on:
 - **Host access (`<all_urls>`)** is used to read the title and preview image of a
   page **you choose to save**, to capture a screenshot thumbnail of the page
   you're viewing when you save it, (if you enable caching) to fetch images you
-  save, and (if you enable AI chat) to send your request to the AI provider's API
-  endpoint you configured. It is not used to monitor your browsing.
+  save, (when you click "Fetch missing images") to fetch a saved page and its
+  preview image, and (if you enable AI chat) to send your request to the AI
+  provider's API endpoint you configured. It is not used to monitor your
+  browsing.
 - **Tabs / scripting** are used to read the current page's title/URL and extract
   its preview image when you save it.
 - **Storage / unlimited storage** hold your collections and cached images
