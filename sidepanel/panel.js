@@ -2864,7 +2864,7 @@ async function updateSettingLabels() {
   if (cacheBtn) cacheBtn.textContent = `Cache images: ${s.cacheImages ? 'On' : 'Off'}`;
   const replaceImgBtn = $('#toggle-replace-images-btn');
   if (replaceImgBtn)
-    replaceImgBtn.textContent = `Fetch images: ${s.replaceExistingImages ? 'Replace all' : 'Missing only'}`;
+    replaceImgBtn.textContent = `Replace existing images: ${s.replaceExistingImages ? 'On' : 'Off'}`;
   const autoCheckBtn = $('#toggle-autocheck-btn');
   if (autoCheckBtn) autoCheckBtn.textContent = `Auto-check links: ${s.autoCheckLinks ? 'On' : 'Off'}`;
   const closeAfterOpenBtn = $('#toggle-close-after-open-btn');
@@ -2967,7 +2967,7 @@ async function runMenuAction(action) {
   if (action === 'toggle-replace-images') {
     const s = await getSettings();
     await setSettings({ replaceExistingImages: !s.replaceExistingImages });
-    toast(`Fetch images: ${!s.replaceExistingImages ? 'replace all' : 'missing only'}`);
+    toast(`Replace existing images ${!s.replaceExistingImages ? 'on' : 'off'}`);
   }
   if (action === 'toggle-autocheck') {
     const s = await getSettings();

@@ -3,6 +3,16 @@
 Release notes for Collections Plus. The summaries here double as the
 "What's new" copy used in the Chrome Web Store listing.
 
+## 2.4.1
+
+**Clearer label for the image-fetch setting.** The "Fetch images: Missing only"
+toggle read like a third fetch *action* sitting next to "Fetch missing images"
+and "Fetch all missing images," when it's actually the setting that controls
+whether a fetch fills in blanks or refreshes every image. It's now
+**Replace existing images: Off/On**, matching the other toggles in the menu.
+Same behavior — off (the default) only fills in pages with no image, on re-pulls
+them all. Thanks to the user who flagged the confusing wording.
+
 ## 2.4.0
 
 **Fetch missing images for imported pages.** Importing a CSV (e.g. from Edge
