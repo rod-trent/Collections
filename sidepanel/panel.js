@@ -22,7 +22,7 @@ import {
   deleteTrashEntry,
   emptyTrash,
   purgeExpiredTrash,
-  reorderCollections,
+  saveArrangement,
   addItem,
   updateItem,
   removeItem,
@@ -43,6 +43,7 @@ import {
   exportJSON,
   importJSON,
   importEdgeCsv,
+  importEdgeSqlite,
   importBookmarks,
   addRule,
   removeRule,
@@ -130,7 +131,12 @@ let fileMode = null; // 'csv' | 'json' | 'cover'
 let query = ''; // current list-view search text (lower-cased)
 let itemFilter = ''; // current in-collection item filter (lower-cased)
 // Display-only view preferences (mirrored from settings; never reorder data).
-let viewPrefs = { itemSort: 'manual', itemDensity: 'comfortable', collectionSort: 'manual' };
+let viewPrefs = {
+  itemSort: 'manual',
+  itemDensity: 'comfortable',
+  collectionSort: 'manual',
+  readingListEnabled: true,
+};
 let aiMode = null; // 'settings' | 'chat' | null
 let chatScope = { type: 'all' }; // { type:'all' } | { type:'collection', id }
 let chatHistory = []; // [{ role:'user'|'assistant'|'error', content }]
@@ -836,6 +842,7 @@ function buildFolderHeader(f, count) {
   if (isColorValue(f.color)) el.style.setProperty('--folder-color', f.color);
   el.classList.toggle('has-color', isColorValue(f.color));
   el.innerHTML = `
+    <span class="folder-handle" title="Drag to reorder">⠿</span>
     <button class="folder-toggle" title="Collapse / expand">${f.collapsed ? '▸' : '▾'}</button>
     <span class="folder-icon" aria-hidden="true">📁</span>
     <span class="folder-name">${escapeHtml(f.name)}</span>
@@ -868,9 +875,11 @@ function buildFolderHeader(f, count) {
     }
   });
 
-  // Drop a dragged collection card onto the header to move it into this folder.
+  // Drops onto the header: a dragged card is filed into this folder; a dragged
+  // folder is reordered to sit just before this one.
   el.addEventListener('dragover', (e) => {
-    if (!cardDragId) return;
+    if (!cardDragId && !folderDragId) return;
+    if (folderDragId === f.id) return; // not onto itself
     e.preventDefault();
     el.classList.add('drop-target');
   });
@@ -878,9 +887,21 @@ function buildFolderHeader(f, count) {
   el.addEventListener('drop', async (e) => {
     e.preventDefault();
     el.classList.remove('drop-target');
-    if (!cardDragId) return;
-    await setParent(cardDragId, f.id);
+    if (folderDragId && folderDragId !== f.id) {
+      for (const b of folderBlock(folderDragId)) els.collections.insertBefore(b, el);
+      await persistArrangement();
+      return;
+    }
+    if (cardDragId) {
+      const dragged = els.collections.querySelector(`.card[data-id="${cardDragId}"]`);
+      if (!dragged) return;
+      dragged.dataset.parent = f.id; // file into this folder (as its first item)
+      els.collections.insertBefore(dragged, el.nextSibling);
+      await persistArrangement();
+    }
   });
+
+  wireFolderDrag(el, f);
   return el;
 }
 
@@ -900,7 +921,14 @@ function renderList(data) {
   els.collections.innerHTML = '';
   syncViewControls();
 
-  const arrange = (list) => pinnedFirst(sortCollections(list, viewPrefs.collectionSort));
+  const manual = viewPrefs.collectionSort === 'manual';
+  const byOrder = (a, b) => (a.order ?? 0) - (b.order ?? 0);
+  // Within a scope: manual order follows the stored `order`; otherwise the
+  // chosen sort. Pinned collections always float to the top of their scope.
+  const arrange = (list) =>
+    manual
+      ? pinnedFirst([...list].sort(byOrder))
+      : pinnedFirst(sortCollections(list, viewPrefs.collectionSort));
 
   // While searching, show a flat list (no folder grouping).
   if (query) {
@@ -908,15 +936,36 @@ function renderList(data) {
     return;
   }
 
-  // Top-level collections first, then each folder with its collections.
-  for (const c of arrange(filtered.filter((c) => !c.parentId))) {
-    els.collections.appendChild(buildCard(c));
-  }
-  for (const f of folders) {
+  const appendFolder = (f) => {
     const kids = arrange(filtered.filter((c) => c.parentId === f.id));
     els.collections.appendChild(buildFolderHeader(f, kids.length));
     if (!f.collapsed) for (const c of kids) els.collections.appendChild(buildCard(c));
+  };
+
+  if (manual) {
+    // Manual mode: folders and top-level collections share one order, so they
+    // interleave (Folder A, Collection 1, Folder B, …). Pinned collections still
+    // rise to the very top.
+    const topCols = filtered.filter((c) => !c.parentId);
+    const nodes = [
+      ...folders.map((f) => ({ kind: 'folder', order: f.order ?? 0, f })),
+      ...topCols.map((c) => ({ kind: 'collection', order: c.order ?? 0, pinned: c.pinned, c })),
+    ].sort((a, b) => a.order - b.order);
+    const pinned = nodes.filter((n) => n.pinned);
+    const rest = nodes.filter((n) => !n.pinned);
+    for (const n of [...pinned, ...rest]) {
+      if (n.kind === 'folder') appendFolder(n.f);
+      else els.collections.appendChild(buildCard(n.c));
+    }
+    return;
   }
+
+  // Sorted mode: sorted top-level collections first, then folders (in their
+  // manual order) each with its sorted collections.
+  for (const c of arrange(filtered.filter((c) => !c.parentId))) {
+    els.collections.appendChild(buildCard(c));
+  }
+  for (const f of [...folders].sort(byOrder)) appendFolder(f);
 }
 
 // ---- Trash / Archive view --------------------------------------------------
@@ -1072,6 +1121,71 @@ function buildBinRow(entry, isTrash) {
 // ---- Drag & drop reorder (collection list) ---------------------------------
 
 let cardDragId = null;
+let folderDragId = null;
+
+// A folder's DOM "block": its header plus the child cards rendered under it.
+function folderBlock(fid) {
+  const header = els.collections.querySelector(`.folder-header[data-folder="${fid}"]`);
+  if (!header) return [];
+  const block = [header];
+  let n = header.nextElementSibling;
+  while (n && n.classList.contains('card') && (n.dataset.parent || '') === fid) {
+    block.push(n);
+    n = n.nextElementSibling;
+  }
+  return block;
+}
+
+// Read the full top-level arrangement back out of the DOM after a drag: folder
+// headers and top-level cards share one running order (so they interleave);
+// cards inside a folder get their own per-folder order and keep their parent.
+function readArrangement() {
+  const entries = [];
+  let top = 0;
+  const kid = {};
+  for (const el of els.collections.children) {
+    if (el.classList.contains('folder-header')) {
+      entries.push({ kind: 'folder', id: el.dataset.folder, order: top++ });
+    } else if (el.dataset.id) {
+      const parent = el.dataset.parent || '';
+      if (parent) {
+        kid[parent] = kid[parent] || 0;
+        entries.push({ kind: 'collection', id: el.dataset.id, parentId: parent, order: kid[parent]++ });
+      } else {
+        entries.push({ kind: 'collection', id: el.dataset.id, parentId: '', order: top++ });
+      }
+    }
+  }
+  return entries;
+}
+
+async function persistArrangement() {
+  await saveArrangement(readArrangement());
+}
+
+// Reorder folders (with their children) among the top-level list. Only active in
+// manual sort — a computed sort would immediately override any manual order.
+function wireFolderDrag(el, f) {
+  const handle = el.querySelector('.folder-handle');
+  if (!handle) return;
+  handle.addEventListener('mousedown', () => {
+    if (viewPrefs.collectionSort === 'manual') el.draggable = true;
+  });
+  el.addEventListener('mouseup', () => {
+    el.draggable = false;
+  });
+  el.addEventListener('dragstart', (e) => {
+    folderDragId = f.id;
+    el.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  el.addEventListener('dragend', () => {
+    folderDragId = null;
+    el.draggable = false;
+    el.classList.remove('dragging');
+    document.querySelectorAll('.drop-target').forEach((x) => x.classList.remove('drop-target'));
+  });
+}
 
 function wireCardDrag(card) {
   // Only allow dragging from the handle, so clicking the card still opens it.
@@ -1107,17 +1221,23 @@ function wireCardDrag(card) {
   card.addEventListener('drop', async (e) => {
     e.preventDefault();
     card.classList.remove('drop-target');
+    // A folder dropped onto a card lands (with its children) just before it.
+    if (folderDragId) {
+      const block = folderBlock(folderDragId);
+      if (block.length) {
+        for (const el of block) els.collections.insertBefore(el, card);
+        await persistArrangement();
+      }
+      return;
+    }
     if (!cardDragId || cardDragId === card.dataset.id) return;
-    const dragged = els.collections.querySelector(`[data-id="${cardDragId}"]`);
+    const dragged = els.collections.querySelector(`.card[data-id="${cardDragId}"]`);
     if (!dragged) return;
     // Dropping onto a card adopts that card's folder: drop onto an in-folder
     // card to join the folder, or onto a top-level card to leave it.
-    const targetParent = card.dataset.parent || '';
-    const changedFolder = (dragged.dataset.parent || '') !== targetParent;
+    dragged.dataset.parent = card.dataset.parent || '';
     els.collections.insertBefore(dragged, card);
-    const order = [...els.collections.children].map((el) => el.dataset.id).filter(Boolean);
-    if (changedFolder) await setParent(cardDragId, targetParent || null);
-    await reorderCollections(order);
+    await persistArrangement();
   });
 }
 
@@ -1205,7 +1325,9 @@ function renderItem(collectionId, item) {
     bodyHtml = `
       <div class="item-title"><a href="${escapeHtml(
         item.srcPageUrl || item.src
-      )}" target="_blank" rel="noreferrer">${escapeHtml(item.alt || 'Image')}</a></div>
+      )}" target="_blank" rel="noreferrer" title="${escapeHtml(item.alt || 'Image')}">${escapeHtml(
+      item.alt || 'Image'
+    )}</a></div>
       <div class="item-url">${escapeHtml(hostOf(item.srcPageUrl || item.src))}</div>`;
   } else {
     // page
@@ -1221,7 +1343,9 @@ function renderItem(collectionId, item) {
     bodyHtml = `
       <div class="item-title">${unreadDot}<a href="${escapeHtml(
         item.url
-      )}" target="_blank" rel="noreferrer">${escapeHtml(item.title)}</a></div>
+      )}" target="_blank" rel="noreferrer" title="${escapeHtml(item.title)}">${escapeHtml(
+      item.title
+    )}</a></div>
       <div class="item-url">${escapeHtml(hostOf(item.url))}${linkStatusHtml(item)}</div>
       ${item.snapshot ? `<button class="item-snapshot-view" title="Read the saved snapshot">📄 Saved snapshot</button>` : ''}`;
   }
@@ -1879,15 +2003,16 @@ async function addCurrentPage() {
       /* capture not permitted on some pages */
     }
   }
+  const settings = await getSettings();
   const out = await addItem(openId, {
     type: 'page',
     url: tab.url,
     title: (meta && meta.title) || tab.title || tab.url,
     favIconUrl: tab.favIconUrl || '',
     thumbnail,
-    unread: true,
+    unread: settings.readingListEnabled,
   });
-  if (out?.item && (await getSettings()).cacheImages) {
+  if (out?.item && settings.cacheImages) {
     await cacheItemImage(out.collection.id, out.item.id);
   }
   toast('Page added');
@@ -1903,6 +2028,7 @@ async function addAllTabs() {
   const data = await getData();
   const col = data.collections.find((c) => c.id === openId);
   const existing = new Set((col?.items || []).filter((i) => i.type === 'page').map((i) => i.url));
+  const readingOn = (await getSettings()).readingListEnabled;
 
   let added = 0;
   for (const t of pages) {
@@ -1912,7 +2038,7 @@ async function addAllTabs() {
       url: t.url,
       title: t.title || t.url,
       favIconUrl: t.favIconUrl || '',
-      unread: true,
+      unread: readingOn,
     });
     existing.add(t.url);
     added++;
@@ -2272,11 +2398,13 @@ async function buildPaletteCommands() {
     reportLinkCheck(await chrome.runtime.sendMessage({ type: 'checkLinks' }));
   });
   add('Version history', () => openHistoryMenu());
-  add('Reading list', () => openBin('reading'));
-  add('Mark all read', async () => {
-    const n = await markAllRead();
-    toast(n ? `Marked ${n} item${n === 1 ? '' : 's'} read` : 'Nothing to mark');
-  });
+  if (viewPrefs.readingListEnabled) {
+    add('Reading list', () => openBin('reading'));
+    add('Mark all read', async () => {
+      const n = await markAllRead();
+      toast(n ? `Marked ${n} item${n === 1 ? '' : 's'} read` : 'Nothing to mark');
+    });
+  }
   add('Open Archive', () => openBin('archive'));
   add('Open Trash', () => openBin('trash'));
   add('Export backup (JSON)', () => doExport());
@@ -2284,6 +2412,7 @@ async function buildPaletteCommands() {
   add('Export all as Markdown', () => doExportDoc('md'));
   add('Export all as HTML', () => doExportDoc('html'));
   add('Import Edge CSV…', () => pickFile('csv'));
+  add('Import Edge Collections database (SQLite)…', () => pickFile('sqlite'));
   add('Import backup (JSON)…', () => pickFile('json'));
   add('Import browser bookmarks…', () => doImportBookmarks());
   add('Auto-file rules…', () => openRules());
@@ -2401,6 +2530,9 @@ function pickFile(mode) {
   els.fileInput.value = '';
   if (mode === 'csv') els.fileInput.accept = '.csv,text/csv';
   else if (mode === 'cover') els.fileInput.accept = 'image/*';
+  // Edge's file is literally named "collectionsSQLite" with no extension, so
+  // don't restrict the picker — an accept filter would hide it entirely.
+  else if (mode === 'sqlite') els.fileInput.accept = '';
   else els.fileInput.accept = '.json,application/json';
   els.fileInput.click();
 }
@@ -2498,6 +2630,13 @@ els.fileInput.addEventListener('change', async () => {
       const dataUrl = await fileToCover(file);
       await setCover(openId, dataUrl);
       toast('Cover updated');
+      return;
+    }
+    if (fileMode === 'sqlite') {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const stats = await importEdgeSqlite(bytes);
+      await render();
+      toast(`Imported ${stats.pages} page(s) into ${stats.collections} collection(s)`);
       return;
     }
     const text = await file.text();
@@ -2870,6 +3009,9 @@ async function updateSettingLabels() {
   const closeAfterOpenBtn = $('#toggle-close-after-open-btn');
   if (closeAfterOpenBtn)
     closeAfterOpenBtn.textContent = `Close panel after Open all: ${s.closeAfterOpenAll ? 'On' : 'Off'}`;
+  const readingBtn = $('#toggle-reading-list-btn');
+  if (readingBtn)
+    readingBtn.textContent = `Reading list: ${s.readingListEnabled !== false ? 'On' : 'Off'}`;
   const themeBtn = $('#toggle-theme-btn');
   if (themeBtn) {
     const label = s.theme === 'light' ? 'Light' : s.theme === 'system' ? 'System' : 'Dark';
@@ -2888,6 +3030,9 @@ function updateBinBadges(data) {
   set('#archive-badge', (data.archive || []).length);
   set('#trash-badge', (data.trash || []).length);
   set('#reading-badge', countUnread(data));
+  // Hide the Reading-list (📖) entry point entirely when the feature is off.
+  const readingBtn = $('#open-reading-btn');
+  if (readingBtn) readingBtn.hidden = !viewPrefs.readingListEnabled;
 }
 
 /** Count unread (read-later) page items across all live collections. */
@@ -2951,6 +3096,7 @@ async function runMenuAction(action) {
   if (action === 'import-json') pickFile('json');
   if (action === 'import-bookmarks') doImportBookmarks();
   if (action === 'import-csv') pickFile('csv');
+  if (action === 'import-sqlite') pickFile('sqlite');
   if (action === 'toggle-cache') {
     const s = await getSettings();
     await setSettings({ cacheImages: !s.cacheImages });
@@ -2979,6 +3125,12 @@ async function runMenuAction(action) {
     await setSettings({ closeAfterOpenAll: !s.closeAfterOpenAll });
     toast(`Close panel after Open all ${!s.closeAfterOpenAll ? 'on' : 'off'}`);
   }
+  if (action === 'toggle-reading-list') {
+    const enabled = !viewPrefs.readingListEnabled;
+    if (!enabled && binMode === 'reading') binMode = null; // leave the reading view
+    await setViewPref({ readingListEnabled: enabled }); // persists + re-renders
+    toast(`Reading list ${enabled ? 'on' : 'off'}`);
+  }
   if (action === 'rules') await openRules();
   if (action === 'toggle-theme') await cycleTheme();
   if (action === 'history') openHistoryMenu();
@@ -3004,28 +3156,21 @@ function closeOverflow() {
   closeSubmenus();
 }
 
-/** Open a category submenu as a flyout to the LEFT of the overflow menu. */
-function openSubmenu(name, trigger) {
-  const menu = $(`#submenu-${name}`);
-  if (!menu || !menu.hidden) return; // already open — don't re-trigger on hover
-  closeSubmenus();
-  // Tools/Sync need their dynamic labels/visibility refreshed before measuring.
-  if (name === 'tools') updateSettingLabels();
-  if (name === 'sync') refreshSyncMenu();
-
-  const overflow = $('#overflow-menu').getBoundingClientRect();
+/** Position a floating flyout to the LEFT of its anchor menu, beside `trigger`. */
+function positionFlyout(menu, anchorMenu, trigger) {
+  const anchor = anchorMenu.getBoundingClientRect();
   // The side panel can only draw within its own width, so cap the flyout to the
   // space to the LEFT of the menu. This guarantees it sits fully beside the menu
   // (never covering it, never clipping past the panel's left edge), while the
   // menu stays visible so you can move back or hover another category.
-  const avail = Math.round(overflow.left - 10);
+  const avail = Math.round(anchor.left - 10);
   menu.style.maxWidth = `${avail}px`;
   menu.style.minWidth = `${Math.min(200, avail)}px`;
   menu.hidden = false;
 
   const place = () => {
     const rect = menu.getBoundingClientRect();
-    const left = Math.max(8, overflow.left - rect.width - 2);
+    const left = Math.max(8, anchor.left - rect.width - 2);
     let top = trigger.getBoundingClientRect().top;
     if (top + rect.height > window.innerHeight - 8) {
       top = Math.max(8, window.innerHeight - rect.height - 8);
@@ -3035,6 +3180,30 @@ function openSubmenu(name, trigger) {
   };
   place();
   place(); // second pass settles position once the final width is known
+}
+
+/** Open a category submenu as a flyout to the LEFT of the overflow menu. */
+function openSubmenu(name, trigger) {
+  const menu = $(`#submenu-${name}`);
+  if (!menu || !menu.hidden) return; // already open — don't re-trigger on hover
+  closeSubmenus();
+  // Tools/Sync need their dynamic labels/visibility refreshed before measuring.
+  if (name === 'tools') updateSettingLabels();
+  if (name === 'sync') refreshSyncMenu();
+  positionFlyout(menu, $('#overflow-menu'), trigger);
+}
+
+/** Same, but anchored to the in-collection (detail) overflow menu. */
+function openDetailSubmenu(name, trigger) {
+  const menu = $(`#submenu-${name}`);
+  if (!menu || !menu.hidden) return;
+  closeSubmenus();
+  positionFlyout(menu, $('#detail-overflow-menu'), trigger);
+}
+
+function closeDetailMenu() {
+  $('#detail-overflow-menu').hidden = true;
+  closeSubmenus();
 }
 
 $('#overflow-btn').addEventListener('click', (e) => {
@@ -3067,8 +3236,9 @@ $('#overflow-menu').addEventListener('mouseover', (e) => {
   if (trigger) openSubmenu(trigger.dataset.submenu, trigger);
 });
 
-// Clicks inside a submenu run the action and close everything.
-document.querySelectorAll('.submenu').forEach((menu) => {
+// Clicks inside a settings submenu run the action and close everything. Detail
+// submenus are wired separately (their actions live in runDetailAction).
+document.querySelectorAll('.submenu:not(.detail-submenu)').forEach((menu) => {
   menu.addEventListener('click', async (e) => {
     const action = e.target.dataset.action;
     if (!action) return;
@@ -3080,7 +3250,13 @@ document.querySelectorAll('.submenu').forEach((menu) => {
 // Clicking anywhere outside the menus closes the submenus (the generic handler
 // closes the overflow menu itself).
 document.addEventListener('click', (e) => {
-  if (e.target.closest('.submenu') || e.target.closest('#overflow-menu') || e.target.closest('#overflow-btn')) {
+  if (
+    e.target.closest('.submenu') ||
+    e.target.closest('#overflow-menu') ||
+    e.target.closest('#overflow-btn') ||
+    e.target.closest('#detail-overflow-menu') ||
+    e.target.closest('#detail-overflow-btn')
+  ) {
     return;
   }
   closeSubmenus();
@@ -3093,6 +3269,7 @@ els.listEmpty.addEventListener('click', async (e) => {
     open(c.id);
   }
   if (action === 'import-csv') pickFile('csv');
+  if (action === 'import-sqlite') pickFile('sqlite');
 });
 
 // Trash / Archive view
@@ -3176,13 +3353,41 @@ els.detailTitle.addEventListener('change', () => {
 
 $('#detail-overflow-btn').addEventListener('click', (e) => {
   e.stopPropagation();
-  openMenu($('#detail-overflow-menu'), $('#detail-overflow-menu').hidden);
+  const willOpen = $('#detail-overflow-menu').hidden;
+  closeSubmenus();
+  openMenu($('#detail-overflow-menu'), willOpen);
 });
 
+// A category trigger flies its submenu out; a leaf runs its action. Actions are
+// grouped into submenus (Add / Export & share / AI / Manage) to keep the menu short.
 $('#detail-overflow-menu').addEventListener('click', async (e) => {
+  const trigger = e.target.closest('.submenu-trigger');
+  if (trigger) {
+    e.stopPropagation();
+    openDetailSubmenu(trigger.dataset.submenu, trigger);
+    return;
+  }
   const action = e.target.dataset.action;
   if (!action) return;
-  $('#detail-overflow-menu').hidden = true;
+  closeDetailMenu();
+  await runDetailAction(action);
+});
+
+$('#detail-overflow-menu').addEventListener('mouseover', (e) => {
+  const trigger = e.target.closest('.submenu-trigger');
+  if (trigger) openDetailSubmenu(trigger.dataset.submenu, trigger);
+});
+
+document.querySelectorAll('.detail-submenu').forEach((menu) => {
+  menu.addEventListener('click', async (e) => {
+    const action = e.target.dataset.action;
+    if (!action) return;
+    closeDetailMenu();
+    await runDetailAction(action);
+  });
+});
+
+async function runDetailAction(action) {
   const data = await getData();
   const c = data.collections.find((x) => x.id === openId);
   if (!c) return;
@@ -3261,7 +3466,7 @@ $('#detail-overflow-menu').addEventListener('click', async (e) => {
     back();
     await deleteCollectionWithUndo(id);
   }
-});
+}
 
 // Re-render whenever the data changes (from this panel or the service worker),
 // and mirror the change to the sync file unless the change *came from* a pull.
@@ -3320,7 +3525,12 @@ document.addEventListener('drop', async (e) => {
     toast('Already in this collection');
     return;
   }
-  await addItem(target, { type: 'page', url, title: url, unread: true });
+  await addItem(target, {
+    type: 'page',
+    url,
+    title: url,
+    unread: (await getSettings()).readingListEnabled,
+  });
   toast('Saved');
 });
 
@@ -3331,6 +3541,7 @@ getSettings().then((s) => {
     itemSort: s.itemSort || 'manual',
     itemDensity: s.itemDensity || 'comfortable',
     collectionSort: s.collectionSort || 'manual',
+    readingListEnabled: s.readingListEnabled !== false,
   };
   render();
 });

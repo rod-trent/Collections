@@ -37,7 +37,9 @@ step. Your data stays in your browser.
   fields); results show which items matched, and an open collection gets its own
   **filter box** to narrow its items instantly.
 - **Folders** to group collections, **pin** favorites to the top, and **tags**
-  (click a tag to filter).
+  (click a tag to filter). **Reorder folders** by their drag handle, and — in
+  manual sort — folders and top-level collections share **one order**, so you can
+  interleave them freely (Folder A, Collection 1, Folder B, …).
 - **Sort & compact view:** sort items (Newest / Oldest / A–Z) and collections
   (Newest / A–Z), or keep your manual drag order; a compact toggle fits more on
   screen. Sorting is display-only and your choice is remembered.
@@ -50,7 +52,9 @@ step. Your data stays in your browser.
 - **Custom covers:** upload an image or promote a saved thumbnail with ★.
 - **Reading list (read-it-later):** saved pages start **unread** and gather in
   the **📖 Reading list** (with a toolbar count); opening one marks it read, or
-  use **Mark all read**. Bulk imports stay read so they don't flood it.
+  use **Mark all read**. Bulk imports stay read so they don't flood it. Don't use
+  it? Turn it off with **Reading list: Off** (⋯ → Tools) and new pages stop being
+  marked unread.
 - **Light / dark / system theme:** cycle in the ⋯ menu. **System** follows your
   OS / Chrome light-dark setting and switches live (e.g. at sunrise/sunset).
 - **Command palette (`Ctrl+K` / `⌘K`):** jump to any collection or run any
@@ -74,6 +78,12 @@ step. Your data stays in your browser.
   **Fetch all missing images** in settings) to pull each page's preview image in
   bulk. Or hover a single page and click **🖼️** to fetch just that one. By
   default it only fills in pages with no image yet.
+- **Import Edge's leftover database** (for anyone who missed the CSV export
+  before Collections was retired). Edge leaves a SQLite file behind at
+  `%LOCALAPPDATA%\Microsoft\Edge\User Data\<profile>\Collections\collectionsSQLite`
+  — ⋯ → *Import Edge database (SQLite)…*, browse to that file, and your
+  collections come back, **with thumbnails and favicons** (which the CSV never
+  had). It's read directly with a small built-in SQLite reader — no extra tools.
 - **Import your browser bookmarks** (Chrome/Edge) — each bookmark folder becomes
   a collection.
 - **JSON backup** (high fidelity: keeps notes, images, fields) and a local

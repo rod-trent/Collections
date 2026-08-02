@@ -310,6 +310,61 @@ console.log('\nread-later (unread) state:');
   assert((await store.markAllRead()) === 0, 'markAllRead is a no-op when all read');
 }
 
+console.log('\nmanual order (folders + collections interleave):');
+{
+  reset();
+  // Seed two top-level collections and one folder with a child, no order fields.
+  mem.collectionsData = {
+    version: 3,
+    collections: [
+      { id: 'a', title: 'A', items: [] },
+      { id: 'b', title: 'B', items: [] },
+      { id: 'child', title: 'Child', parentId: 'f1', items: [] },
+    ],
+    folders: [{ id: 'f1', name: 'Folder' }],
+  };
+  let data = await store.getData();
+  const ord = (id) =>
+    (data.collections.find((c) => c.id === id) || data.folders.find((f) => f.id === id)).order;
+  // First upgrade lays out top collections, then folders: A=0, B=1, folder=2.
+  assert(ord('a') === 0 && ord('b') === 1, 'top-level collections get initial order 0,1');
+  assert(ord('f1') === 2, 'folder ordered after top-level collections');
+  assert(ord('child') === 0, 'child collection gets per-folder order 0');
+
+  // Interleave: put folder between A and B, and move `child` to top level after B.
+  await store.saveArrangement([
+    { kind: 'collection', id: 'a', parentId: '', order: 0 },
+    { kind: 'folder', id: 'f1', order: 1 },
+    { kind: 'collection', id: 'b', parentId: '', order: 2 },
+    { kind: 'collection', id: 'child', parentId: '', order: 3 },
+  ]);
+  data = await store.getData();
+  assert(ord('f1') === 1 && ord('b') === 2, 'saveArrangement interleaves folder between A and B');
+  const child = data.collections.find((c) => c.id === 'child');
+  assert(child.parentId === null && child.order === 3, 'saveArrangement re-parents child to top level');
+}
+
+console.log('\ncreateFolder / setParent ordering:');
+{
+  reset();
+  await store.createCollection('First'); // order -1 (front)
+  const folder = await store.createFolder('Box');
+  let data = await store.getData();
+  const f = data.folders.find((x) => x.id === folder.id);
+  const first = data.collections.find((c) => c.title === 'First');
+  assert(f.order > first.order, 'new folder appends after existing top-level items');
+
+  await store.setParent(first.id, folder.id);
+  data = await store.getData();
+  const moved = data.collections.find((c) => c.id === first.id);
+  assert(moved.parentId === folder.id && moved.order === 0, 'setParent lands child at end of empty folder (order 0)');
+
+  await store.removeFolder(folder.id);
+  data = await store.getData();
+  const orphan = data.collections.find((c) => c.id === first.id);
+  assert(orphan.parentId === null && typeof orphan.order === 'number', 'removeFolder orphans child back to top level with an order');
+}
+
 console.log('');
 if (failures) {
   console.error(`${failures} assertion(s) failed`);

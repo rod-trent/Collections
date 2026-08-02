@@ -167,7 +167,7 @@ chrome.commands?.onCommand.addListener(async (command) => {
     title,
     favIconUrl: tab.favIconUrl || '',
     thumbnail,
-    unread: true,
+    unread: (await getSettings()).readingListEnabled,
   });
   await maybeCache(out);
 });
@@ -217,7 +217,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
       url: info.linkUrl,
       title: info.linkText || info.selectionText || info.linkUrl,
       favIconUrl: tab?.favIconUrl || '',
-      unread: true,
+      unread: (await getSettings()).readingListEnabled,
     });
     return;
   }
@@ -250,7 +250,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     title: meta.title || tab?.title || tab?.url || info.pageUrl,
     favIconUrl: tab?.favIconUrl || '',
     thumbnail: meta.thumbnail || '',
-    unread: true,
+    unread: (await getSettings()).readingListEnabled,
   });
   await maybeCache(out);
 });

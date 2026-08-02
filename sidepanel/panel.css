@@ -277,14 +277,16 @@ body {
 
 /* Hide drag handles while a non-manual sort is active (drag would be a no-op). */
 .items.no-drag .drag-handle,
-.cards.no-drag .card-handle {
+.cards.no-drag .card-handle,
+.cards.no-drag .folder-handle {
   visibility: hidden;
 }
 
-/* Compact item density: smaller thumbnails, tighter rows. */
+/* Compact item density: smaller thumbnails, single-line titles, tighter rows. */
 .items.compact .item {
   padding-top: 6px;
   padding-bottom: 6px;
+  row-gap: 2px;
 }
 
 .items.compact .item-thumb,
@@ -292,6 +294,17 @@ body {
   width: 40px;
   height: 40px;
   font-size: 18px;
+}
+
+/* One line only in compact, so a long title can't re-inflate the row. */
+.items.compact .item-title {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.items.compact .item-favicon {
+  width: 24px;
+  height: 24px;
 }
 
 .items.compact .item-fields,
@@ -511,6 +524,23 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* Drag handle for reordering folders (and interleaving them with collections).
+   Hidden until the header is hovered, mirroring the collection card handle. */
+.folder-handle {
+  flex: 0 0 auto;
+  cursor: grab;
+  color: var(--text-faint);
+  user-select: none;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.folder-header:hover .folder-handle {
+  opacity: 1;
+}
+
 .folder-icon {
   flex: 0 0 auto;
   font-size: 22px;
@@ -525,7 +555,10 @@ body {
   border: none;
   color: var(--text-dim);
   cursor: pointer;
-  font-size: 12px;
+  /* Larger than the old 12px so the expand/collapse affordance is obvious and
+     consistent with the header's other icons. */
+  font-size: 15px;
+  line-height: 1;
   padding: 2px 4px;
 }
 
@@ -713,14 +746,36 @@ body {
 }
 
 /* ---- Item rows ---- */
+/* A two-row grid: handle · thumbnail · body across the top, and the action
+   icons on their own bottom row. Keeping the actions horizontal (instead of a
+   tall vertical stack on the right) is what makes rows short — the old column
+   reserved ~180px of height for seven icons even while they were hidden. */
 .item {
-  display: flex;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  grid-template-areas:
+    'handle media body'
+    'actions actions actions';
+  column-gap: 10px;
+  row-gap: 4px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 9px 10px;
-  align-items: flex-start;
+  align-items: start;
+}
+
+.item > .drag-handle {
+  grid-area: handle;
+}
+.item > .item-media {
+  grid-area: media;
+}
+.item > .item-body {
+  grid-area: body;
+}
+.item > .item-actions {
+  grid-area: actions;
 }
 
 .item.dragging {
@@ -799,11 +854,15 @@ body {
   justify-content: center;
 }
 
+/* Wrap to at most two lines, then ellipsis. The full title is always available
+   via the link's title="" tooltip (set in renderItem). */
 .item-title {
   font-weight: 500;
-  white-space: nowrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .item-title a {
@@ -843,9 +902,13 @@ body {
 
 .item-actions {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 2px;
+  /* Sits under the thumbnail too, so nudge it back level with the body. */
+  margin-top: 2px;
 }
 
 .item-cover-btn,

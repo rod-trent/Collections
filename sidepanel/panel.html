@@ -87,26 +87,11 @@
           <button id="detail-overflow-btn" class="btn icon" title="More">⋯</button>
           <div id="detail-overflow-menu" class="menu" hidden>
             <button data-action="open-all">Open all pages</button>
-            <button data-action="add-note">Add a note</button>
-            <button data-action="add-all-tabs">Add all open tabs</button>
             <div class="menu-sep"></div>
-            <button data-action="chat-collection">Chat about this collection (AI)…</button>
-            <button data-action="suggest-tags">Suggest tags (AI)</button>
-            <button data-action="organize-collection">Organize this collection (AI)…</button>
-            <div class="menu-sep"></div>
-            <button data-action="export-collection-xlsx">Export to Excel (.xlsx)</button>
-            <button data-action="export-collection-csv">Export as CSV</button>
-            <button data-action="export-collection-md">Export as Markdown</button>
-            <button data-action="export-collection-html">Export as HTML</button>
-            <button data-action="share-collection">Share as web page…</button>
-            <button data-action="copy-links">Copy links</button>
-            <div class="menu-sep"></div>
-            <button data-action="edit-tags">Edit tags…</button>
-            <button data-action="cover-upload">Change cover…</button>
-            <button data-action="cover-remove">Remove cover</button>
-            <button data-action="fetch-images">Fetch missing images</button>
-            <button data-action="cache-now">Cache images now</button>
-            <button data-action="check-links">Check links</button>
+            <button class="submenu-trigger" data-submenu="col-add">Add<span class="submenu-caret">›</span></button>
+            <button class="submenu-trigger" data-submenu="col-export">Export &amp; share<span class="submenu-caret">›</span></button>
+            <button class="submenu-trigger" data-submenu="col-ai">AI<span class="submenu-caret">›</span></button>
+            <button class="submenu-trigger" data-submenu="col-manage">Manage<span class="submenu-caret">›</span></button>
             <div class="menu-sep"></div>
             <button data-action="archive-collection">Archive collection</button>
             <button data-action="delete-collection" class="danger">Move to Trash</button>
@@ -277,6 +262,7 @@
     </div>
     <div id="submenu-import" class="menu floating submenu" hidden>
       <button data-action="import-csv">Import Edge CSV…</button>
+      <button data-action="import-sqlite">Import Edge database (SQLite)…</button>
       <button data-action="import-json">Import backup (JSON)…</button>
       <button data-action="import-bookmarks">Import browser bookmarks…</button>
     </div>
@@ -292,6 +278,7 @@
       <button data-action="check-all-links">Check all links</button>
       <button data-action="toggle-autocheck" id="toggle-autocheck-btn">Auto-check links: Off</button>
       <button data-action="toggle-close-after-open" id="toggle-close-after-open-btn">Close panel after Open all: Off</button>
+      <button data-action="toggle-reading-list" id="toggle-reading-list-btn">Reading list: On</button>
       <button data-action="rules">Auto-file rules…</button>
       <button data-action="history">Version history…</button>
     </div>
@@ -303,6 +290,33 @@
       <button data-action="sync-pull" hidden>Pull from sync file</button>
       <button data-action="sync-disconnect" class="danger" hidden>Disconnect sync</button>
       <div id="sync-status" class="menu-note" hidden></div>
+    </div>
+
+    <!-- Floating category submenus for the in-collection (detail) menu -->
+    <div id="submenu-col-add" class="menu floating submenu detail-submenu" hidden>
+      <button data-action="add-note">Add a note</button>
+      <button data-action="add-all-tabs">Add all open tabs</button>
+    </div>
+    <div id="submenu-col-export" class="menu floating submenu detail-submenu" hidden>
+      <button data-action="export-collection-xlsx">Export to Excel (.xlsx)</button>
+      <button data-action="export-collection-csv">Export as CSV</button>
+      <button data-action="export-collection-md">Export as Markdown</button>
+      <button data-action="export-collection-html">Export as HTML</button>
+      <button data-action="share-collection">Share as web page…</button>
+      <button data-action="copy-links">Copy links</button>
+    </div>
+    <div id="submenu-col-ai" class="menu floating submenu detail-submenu" hidden>
+      <button data-action="chat-collection">Chat about this collection…</button>
+      <button data-action="suggest-tags">Suggest tags</button>
+      <button data-action="organize-collection">Organize this collection…</button>
+    </div>
+    <div id="submenu-col-manage" class="menu floating submenu detail-submenu" hidden>
+      <button data-action="edit-tags">Edit tags…</button>
+      <button data-action="cover-upload">Change cover…</button>
+      <button data-action="cover-remove">Remove cover</button>
+      <button data-action="fetch-images">Fetch missing images</button>
+      <button data-action="cache-now">Cache images now</button>
+      <button data-action="check-links">Check links</button>
     </div>
 
     <!-- Floating menu for moving/copying an item to another collection -->

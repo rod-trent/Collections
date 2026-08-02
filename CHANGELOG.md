@@ -3,6 +3,44 @@
 Release notes for Collections Plus. The summaries here double as the
 "What's new" copy used in the Chrome Web Store listing.
 
+## 2.5.0
+
+Five requested improvements, from a user's wishlist.
+
+**Recover collections straight from Edge's leftover database.** If you missed
+exporting `collections_export.csv` before Edge Collections went away, your data
+isn't lost — Edge leaves a SQLite file behind at
+`%LOCALAPPDATA%\Microsoft\Edge\User Data\<profile>\Collections\collectionsSQLite`.
+The new **Import Edge database (SQLite)…** (⋯ → Import) reads that file directly
+and rebuilds your collections — and unlike the CSV, it recovers each page's
+**thumbnail and favicon** too. It's a from-scratch, dependency-free SQLite reader
+(no WASM, nothing extra to install), so it stays true to the extension's
+local-first, no-build design. The file has no extension, so just browse to
+`collectionsSQLite` and pick it.
+
+**Arrange folders and collections together.** Folders used to sit in creation
+order, always below your collections. Now folders have a **drag handle** (hover a
+folder header), so you can reorder them — and folders and top-level collections
+share **one manual order**, so you can interleave them however you like:
+*Folder A, Collection 1, Folder B*, and so on. (Manual sort only; switching to
+Newest/A–Z still groups them.)
+
+**Tidier in-collection ⋯ menu.** The long flat menu inside a collection is now
+organized into submenus — **Add**, **Export & share**, **AI**, **Manage** —
+mirroring the main menu, with Open all / Archive / Move to Trash still one click
+away.
+
+**Turn off the Reading list.** Don't use read-it-later? Flip **Reading list: Off**
+(⋯ → Tools). New pages stop being marked unread and the 📖 entry point disappears,
+so nothing piles up waiting to be marked read.
+
+**Shorter, clearer item rows.** The action icons that lived in a tall column down
+the right side of each saved page now sit in a compact row along the **bottom** —
+which reclaims a lot of wasted height on every row. Page titles can **wrap to two
+lines** (with the full title on hover) instead of being cut off early, and
+**Compact** mode is now genuinely compact (single-line titles, smaller
+thumbnails). The folder collapse/expand arrow is bigger and easier to hit, too.
+
 ## 2.4.1
 
 **Clearer label for the image-fetch setting.** The "Fetch images: Missing only"
