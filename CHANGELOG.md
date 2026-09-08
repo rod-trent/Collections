@@ -3,7 +3,10 @@
 Release notes for Collections Plus. The summaries here double as the
 "What's new" copy used in the Chrome Web Store listing.
 
-## Unreleased
+## 2.6.0
+
+Two changes to how the panel opens and closes, from a user report about
+fullscreen.
 
 **Open in a floating pop-up window instead of the side panel.** ⋯ → **Tools** →
 **Open in** switches the toolbar icon between the docked **Side panel**
