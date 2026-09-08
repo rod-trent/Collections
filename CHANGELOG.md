@@ -3,6 +3,21 @@
 Release notes for Collections Plus. The summaries here double as the
 "What's new" copy used in the Chrome Web Store listing.
 
+## Unreleased
+
+**Open in a floating pop-up window instead of the side panel.** ⋯ → **Tools** →
+**Open in** switches the toolbar icon between the docked **Side panel**
+(unchanged, still the default) and a **Pop-up window** — the same UI in its own
+small window. There's no dock/undock animation and nothing reflows the page
+underneath, which is the friendlier behavior in fullscreen. The pop-up reopens
+at the size and position you last left it, and clicking the toolbar icon again
+just focuses it rather than opening a second one.
+
+**Esc closes the panel.** In both the side panel and the pop-up, `Esc` now backs
+out one layer at a time — an open menu, then a dialog or overlay, then a search
+box you're typing in — and closes the panel once there's nothing left to back
+out of. No more reaching for the X in the corner.
+
 ## 2.5.0
 
 Five requested improvements, from a user's wishlist.

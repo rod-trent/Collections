@@ -10,6 +10,7 @@ import {
   ensureActiveCollection,
   findPageByUrl,
   getSettings,
+  setSettings,
   cacheItemImage,
   applyLinkResults,
   applyImageResults,
@@ -31,10 +32,136 @@ async function maybeCache(out) {
   }
 }
 
-// Open the side panel on action click (Edge + Chrome).
-chrome.sidePanel
-  ?.setPanelBehavior({ openPanelOnActionClick: true })
-  .catch((err) => console.warn('setPanelBehavior failed', err));
+// ---- How the toolbar icon opens the UI -------------------------------------
+// Two modes (Settings ▸ Tools ▸ "Open in"):
+//   'sidepanel' — dock panel.html to the browser window. The default.
+//   'popup'     — float panel.html in its own small window. No dock/undock
+//                 animation, and Esc closes it, which matters most in
+//                 fullscreen where the side panel's slide-in is disruptive.
+
+// Fallback size for a pop-up that has never been opened/moved before.
+const POPUP_SIZE = { width: 460, height: 780 };
+
+/** Point the action at the side panel or leave the click to us for the pop-up. */
+async function applyOpenMode(mode) {
+  try {
+    // With openPanelOnActionClick on, Chrome opens the panel itself and
+    // action.onClicked never fires — which is exactly what we want in side
+    // panel mode, and exactly what we have to turn off for the pop-up.
+    await chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: mode !== 'popup' });
+  } catch (err) {
+    console.warn('setPanelBehavior failed', err);
+  }
+}
+
+getSettings()
+  .then((s) => applyOpenMode(s.openMode))
+  .catch(() => applyOpenMode('sidepanel'));
+
+/**
+ * The last ordinary browser window you focused.
+ *
+ * The pop-up is a window in its own right and it's the focused one while you're
+ * using it, so "the current window" would be the pop-up itself. Everything that
+ * asks "what page am I looking at?" goes through here instead.
+ */
+async function hostWindowId() {
+  const { hostWindowId: remembered } = await chrome.storage.session.get('hostWindowId');
+  if (typeof remembered === 'number') {
+    try {
+      await chrome.windows.get(remembered);
+      return remembered;
+    } catch {
+      /* that window has since been closed — fall through to a fresh guess */
+    }
+  }
+  const wins = await chrome.windows.getAll({ windowTypes: ['normal'] });
+  const win = wins.find((w) => w.focused) || wins[wins.length - 1];
+  return win ? win.id : null;
+}
+
+chrome.windows?.onFocusChanged.addListener(async (windowId) => {
+  if (windowId === chrome.windows.WINDOW_ID_NONE) return;
+  try {
+    const win = await chrome.windows.get(windowId);
+    if (win.type === 'normal') await chrome.storage.session.set({ hostWindowId: windowId });
+  } catch {
+    /* the window went away between the event and the lookup */
+  }
+});
+
+/** Focus the pop-up if it's still open, otherwise create it where you left it. */
+async function openPopupWindow() {
+  const { popupWindowId } = await chrome.storage.session.get('popupWindowId');
+  if (typeof popupWindowId === 'number') {
+    try {
+      await chrome.windows.update(popupWindowId, { focused: true, drawAttention: true });
+      return popupWindowId;
+    } catch {
+      /* it was closed since we last looked — open a new one below */
+    }
+  }
+  const { popupBounds } = await getSettings();
+  const win = await chrome.windows.create({
+    url: chrome.runtime.getURL('sidepanel/panel.html?window=popup'),
+    type: 'popup',
+    focused: true,
+    ...POPUP_SIZE,
+    ...(popupBounds || {}),
+  });
+  await chrome.storage.session.set({ popupWindowId: win.id });
+  return win.id;
+}
+
+chrome.action?.onClicked.addListener(async () => {
+  // Only reached in pop-up mode; see applyOpenMode.
+  try {
+    if ((await getSettings()).openMode === 'popup') await openPopupWindow();
+  } catch (err) {
+    console.warn('opening the pop-up window failed', err);
+  }
+});
+
+// Remember where you dragged/resized the pop-up so it comes back the same size.
+// Some platforms fire this repeatedly through a drag, so settle before writing —
+// setSettings is a read-modify-write of the whole settings blob.
+let boundsTimer = null;
+chrome.windows?.onBoundsChanged?.addListener(async (win) => {
+  const { popupWindowId } = await chrome.storage.session.get('popupWindowId');
+  if (win.id !== popupWindowId) return;
+  const bounds = { left: win.left, top: win.top, width: win.width, height: win.height };
+  clearTimeout(boundsTimer);
+  boundsTimer = setTimeout(() => setSettings({ popupBounds: bounds }), 400);
+});
+
+chrome.windows?.onRemoved.addListener(async (windowId) => {
+  const { popupWindowId } = await chrome.storage.session.get('popupWindowId');
+  if (windowId === popupWindowId) await chrome.storage.session.remove('popupWindowId');
+});
+
+/**
+ * Switch modes and move the UI over there now, rather than on the next toolbar
+ * click. Returns which surface we managed to open so the caller knows whether
+ * it's safe to close itself.
+ */
+async function switchOpenMode(mode) {
+  await applyOpenMode(mode);
+  if (mode === 'popup') {
+    await openPopupWindow();
+    return { opened: 'popup' };
+  }
+  const windowId = await hostWindowId();
+  try {
+    if (windowId != null) {
+      await chrome.sidePanel.open({ windowId });
+      return { opened: 'sidepanel' };
+    }
+  } catch {
+    // sidePanel.open() wants a user gesture, and a click inside the pop-up
+    // doesn't always count as one for another window. The toolbar icon works.
+  }
+  return { opened: null };
+}
 
 // ---- Context menus ---------------------------------------------------------
 
@@ -541,6 +668,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.type === 'checkLinks') {
     checkLinks(msg.collectionId).then(sendResponse).catch(() => sendResponse(null));
+    return true; // async response
+  }
+  if (msg?.type === 'hostWindowId') {
+    hostWindowId()
+      .then(sendResponse)
+      .catch(() => sendResponse(null));
+    return true; // async response
+  }
+  if (msg?.type === 'setOpenMode') {
+    switchOpenMode(msg.mode)
+      .then(sendResponse)
+      .catch(() => sendResponse({ opened: null }));
     return true; // async response
   }
   if (msg?.type === 'fetchImages') {

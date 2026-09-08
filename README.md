@@ -11,7 +11,8 @@ step. Your data stays in your browser.
 
 **Saving**
 
-- **Side panel** that mirrors the original Collections pane.
+- **Side panel** that mirrors the original Collections pane — or a **floating
+  pop-up window** if you prefer (⋯ → Tools → *Open in*). **Esc** closes either one.
 - Save the **current page** (with thumbnail, favicon and title) with one click,
   or with the **`Ctrl+Shift+S`** keyboard shortcut (rebindable).
 - **Right-click** any page, link, or image → *Save to Collections Plus ▸ pick a collection*
@@ -210,6 +211,19 @@ Prefer the panel to get out of the way once you've opened a collection? Turn on
 side panel closes itself as soon as the tabs open, so opening a collection is a
 single click with nothing left to dismiss.
 
+### Side panel or floating pop-up
+
+⋯ → **Tools** → **Open in** switches where the toolbar icon opens the UI:
+
+- **Side panel** (default) — docked to the browser window, as before.
+- **Pop-up window** — the same UI in its own small window. It doesn't slide in
+  and out or reflow the page underneath, which is the friendlier behavior in
+  fullscreen, and it remembers where you last put it and how big you made it.
+
+Either way, **Esc** closes the panel: the first press backs out of whatever's
+open (a menu, a dialog, a search field you're typing in), and the next one
+closes the panel itself, so you never have to reach for the X.
+
 ### Reorder collections and items
 
 Drag the **⠿ handle** on a collection card to reorder your list, and the handle
@@ -400,7 +414,7 @@ entered — your key is stored locally and never synced or exported. See the
 
 ```
 manifest.json        MV3 manifest (+ keyboard command)
-background.js        service worker: side panel, context menus, shortcut
+background.js        service worker: panel/pop-up opening, context menus, shortcut
 sidepanel/           panel.html / panel.css / panel.js (the UI)
 lib/store.js         data layer (chrome.storage.local), schema, settings, history
 lib/csv.js           tolerant CSV parser + Edge-export mapper (pure, testable)

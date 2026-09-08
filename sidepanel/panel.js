@@ -1,4 +1,4 @@
-// panel.js — side panel UI controller.
+// panel.js — panel UI controller (side panel and floating pop-up window).
 import {
   getData,
   createCollection,
@@ -695,10 +695,17 @@ async function openAllPages(c) {
   )
     return;
 
+  // A pop-up window can't hold tabs, so aim them at the browser window you came
+  // from; in the side panel `windowId` is null and Chrome uses the current one.
+  const windowId = await hostWindowId();
   const tabIds = [];
   for (const p of pages) {
     try {
-      const tab = await chrome.tabs.create({ url: p.url, active: false });
+      const tab = await chrome.tabs.create({
+        url: p.url,
+        active: false,
+        ...(windowId != null ? { windowId } : {}),
+      });
       if (tab?.id != null) tabIds.push(tab.id);
     } catch (e) {
       /* skip a page that fails to open; keep going with the rest */
@@ -1974,10 +1981,41 @@ async function deleteItemWithUndo(collectionId, itemId) {
   toast('Item removed', { label: 'Undo', fn: () => insertItem(collectionId, item, index) });
 }
 
+// ---- Which browser window are we acting on? --------------------------------
+// In the side panel we're docked to the window we're reading, so the last
+// focused window is the right answer. The pop-up is its own window and it's the
+// focused one while you're using it, so ask the worker which ordinary browser
+// window you came from instead.
+
+/** True when this document is the floating pop-up rather than the side panel. */
+const IS_POPUP = new URLSearchParams(location.search).get('window') === 'popup';
+
+/** The browser window whose tabs we read and write. Null means "unknown". */
+async function hostWindowId() {
+  if (!IS_POPUP) return null;
+  try {
+    const id = await chrome.runtime.sendMessage({ type: 'hostWindowId' });
+    return typeof id === 'number' ? id : null;
+  } catch {
+    return null; // worker asleep or restarting — fall back to the focused window
+  }
+}
+
+/** The page you're actually looking at, side panel or pop-up. */
+async function activePageTab() {
+  const windowId = await hostWindowId();
+  if (windowId != null) {
+    const [tab] = await chrome.tabs.query({ active: true, windowId });
+    if (tab) return tab;
+  }
+  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  return tab;
+}
+
 // ---- Add current page ------------------------------------------------------
 
 async function addCurrentPage() {
-  const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const tab = await activePageTab();
   if (!tab || !tab.url || /^(edge|chrome|about|extension):/i.test(tab.url)) {
     toast("Can't add this page (browser-internal).");
     return;
@@ -2021,7 +2059,10 @@ async function addCurrentPage() {
 /** Add every http(s) tab in the current window to the open collection. */
 async function addAllTabs() {
   if (!openId) return;
-  const tabs = await chrome.tabs.query({ currentWindow: true });
+  const windowId = await hostWindowId();
+  const tabs = await chrome.tabs.query(
+    windowId != null ? { windowId } : { currentWindow: true }
+  );
   const pages = tabs.filter((t) => /^https?:/i.test(t.url || ''));
   if (!pages.length) return toast('No saveable tabs open');
 
@@ -3006,6 +3047,9 @@ async function updateSettingLabels() {
     replaceImgBtn.textContent = `Replace existing images: ${s.replaceExistingImages ? 'On' : 'Off'}`;
   const autoCheckBtn = $('#toggle-autocheck-btn');
   if (autoCheckBtn) autoCheckBtn.textContent = `Auto-check links: ${s.autoCheckLinks ? 'On' : 'Off'}`;
+  const openModeBtn = $('#toggle-open-mode-btn');
+  if (openModeBtn)
+    openModeBtn.textContent = `Open in: ${s.openMode === 'popup' ? 'Pop-up window' : 'Side panel'}`;
   const closeAfterOpenBtn = $('#toggle-close-after-open-btn');
   if (closeAfterOpenBtn)
     closeAfterOpenBtn.textContent = `Close panel after Open all: ${s.closeAfterOpenAll ? 'On' : 'Off'}`;
@@ -3120,6 +3164,33 @@ async function runMenuAction(action) {
     await setSettings({ autoCheckLinks: !s.autoCheckLinks });
     toast(`Auto-check links ${!s.autoCheckLinks ? 'on' : 'off'}`);
   }
+  if (action === 'toggle-open-mode') {
+    const s = await getSettings();
+    const mode = s.openMode === 'popup' ? 'sidepanel' : 'popup';
+    await setSettings({ openMode: mode });
+    closeOverflow();
+    // Move to the new surface right away rather than on the next toolbar click,
+    // and only close this one once we know the other actually opened.
+    let opened = null;
+    try {
+      ({ opened } = (await chrome.runtime.sendMessage({ type: 'setOpenMode', mode })) || {});
+    } catch (e) {
+      /* worker didn't answer — the setting still applies on the next click */
+    }
+    if (opened === mode) {
+      try {
+        window.close(); // the other surface is up; this one is now the stale copy
+      } catch (e) {
+        /* can't close ourselves — harmless, you just have both open */
+      }
+      return;
+    }
+    toast(
+      mode === 'popup'
+        ? 'Opens in a pop-up window — click the toolbar icon'
+        : 'Opens in the side panel — click the toolbar icon'
+    );
+  }
   if (action === 'toggle-close-after-open') {
     const s = await getSettings();
     await setSettings({ closeAfterOpenAll: !s.closeAfterOpenAll });
@@ -3205,6 +3276,43 @@ function closeDetailMenu() {
   $('#detail-overflow-menu').hidden = true;
   closeSubmenus();
 }
+
+// ---- Esc closes the panel --------------------------------------------------
+// Neither surface has a keyboard close of its own: the side panel makes you
+// reach for the X in its top-right corner, and the pop-up's title bar is no
+// closer. Esc backs out one layer at a time — an open menu, then a focused
+// field — and closes the whole thing once there's nothing left to back out of.
+//
+// This listens on the *capture* phase so it runs before the per-overlay Escape
+// handlers further up the file hide their overlay; otherwise the same keypress
+// would close an overlay and then the panel behind it.
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    // An overlay is up: it owns this keypress, and its own handler is next.
+    if (document.querySelector('.modal-overlay:not([hidden])')) return;
+
+    if (!$('#overflow-menu').hidden || !$('#detail-overflow-menu').hidden) {
+      closeOverflow();
+      closeDetailMenu();
+      return;
+    }
+
+    const el = document.activeElement;
+    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+      el.blur(); // first Esc leaves the field; a second one closes the panel
+      return;
+    }
+
+    try {
+      window.close();
+    } catch (err) {
+      /* older browsers won't let a panel close itself — the X still works */
+    }
+  },
+  true
+);
 
 $('#overflow-btn').addEventListener('click', (e) => {
   e.stopPropagation();
